@@ -17,3 +17,5 @@ pillow>=10.4.0          # Icon/resim (GUI için opsiyonel)
 # pyinstaller --onefile --add-binary binaries/ffmpeg.exe:. src/main.py
 # ... önceki paketler ...
 yt-dlp>=2025.10.1  # YouTube + 1000+ site indirme desteği
+pystray>=0.19.5         # Tray icon için
+pillow>=10.4.0          # Icon işleme (zaten varsa ekleme)
