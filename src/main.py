@@ -1,7 +1,7 @@
 # src/main.py
 # SpecterDLx2 - Portable Downloader
-# Gece modu hız sınırlama entegrasyonu + config'den okuma tamamlandı
-# Mevcut tasarım ve mantık %100 korunarak güncellendi
+# Gece modu + hız sınırlama entegrasyonu tamamlandı
+# Mevcut mantık %100 korunarak güncellendi
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -188,7 +188,7 @@ class SpecterDLApp(ctk.CTk):
                 url,
                 f"{name}.ts",
                 update_progress,
-                config_manager=self.config   # Gece modu ve hız sınırlama config'i buradan geliyor
+                config_manager=self.config  # Gece modu ve hız sınırlama burada aktifleşir
             )
             if success:
                 status_label.configure(text="Tamamlandı → downloads klasöründe")
