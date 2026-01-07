@@ -34,8 +34,8 @@ jobs:
         name: SpecterDLx2-exe
         path: dist/SpecterDLx2.exe
 
-    - name: Create Release and Upload EXE
-      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    - name: Create Release and Upload EXE (manuel veya push'ta)
+      if: github.event_name == 'workflow_dispatch'  # Sadece manuel run'da Release oluştur (push'ta hata vermesin)
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ github.run_number }}
