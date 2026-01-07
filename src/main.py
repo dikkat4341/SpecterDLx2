@@ -1,6 +1,7 @@
 # src/main.py
 # SpecterDLx2 - Portable Downloader
-# Çoklu indirme kuyruğu + GUI progress entegrasyonu
+# Gece modu hız sınırlama entegrasyonu + config'den okuma tamamlandı
+# Mevcut tasarım ve mantık %100 korunarak güncellendi
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -28,7 +29,7 @@ class SpecterDLApp(ctk.CTk):
 
         self.progress_widgets = {}  # url -> {'frame': frame, 'bar': bar, 'label': label}
 
-        # Üst kısım (favori + giriş) - önceki gibi kalıyor
+        # Üst kısım (favori + giriş)
         self.top_frame = ctk.CTkFrame(self, corner_radius=10)
         self.top_frame.pack(padx=20, pady=(20, 10), fill="x")
 
@@ -58,15 +59,114 @@ class SpecterDLApp(ctk.CTk):
         self.status_bar = ctk.CTkLabel(self, text="Hazır... | Maks 4 eşzamanlı indirme", height=30, anchor="w", padx=20, text_color="gray")
         self.status_bar.pack(fill="x", side="bottom")
 
-    # add_favorite, load_favorite, parse_url, select_file fonksiyonları önceki gibi kalıyor
-    # Sadece start_download'u güncelle (aşağıda)
+    def add_favorite(self):
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("Giriş eksik", "Favori eklemek için URL girin.")
+            return
+        name = ctk.CTkInputDialog(text="Favori ismi girin:", title="Favori Ekle").get_input()
+        if name:
+            if self.config.add_favorite(name, url):
+                self.favorites = self.config.load_favorites()
+                self.fav_combo.configure(values=[f["name"] for f in self.favorites])
+                messagebox.showinfo("Başarılı", f"{name} favorilere eklendi.")
+            else:
+                messagebox.showwarning("Uyarı", "Bu URL zaten favorilerde.")
+
+    def load_favorite(self):
+        selected_name = self.fav_combo.get()
+        for f in self.favorites:
+            if f["name"] == selected_name:
+                self.url_entry.delete(0, "end")
+                self.url_entry.insert(0, f["url"])
+                self.parse_url()
+                break
+
+    def parse_url(self):
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("Giriş eksik", "Lütfen URL veya dosya yolu girin.")
+            return
+
+        self.status_bar.configure(text="Yükleniyor...")
+        self.update()
+
+        try:
+            parser = XtreamParser()
+            channels, error = parser.parse(url)
+
+            for widget in self.result_frame.winfo_children():
+                if widget != self.welcome_label:
+                    widget.destroy()
+
+            if error:
+                self.welcome_label.configure(text=f"Hata:\n{error}", text_color="red")
+                self.status_bar.configure(text=f"Hata: {error[:80]}...")
+                return
+
+            if not channels:
+                self.welcome_label.configure(text="Kanal bulunamadı.", text_color="orange")
+                self.status_bar.configure(text="Boş liste.")
+                return
+
+            self.welcome_label.pack_forget()
+
+            current_category = None
+            for ch in channels:
+                cat = ch.get("category", "Genel")
+                if cat != current_category:
+                    cat_label = ctk.CTkLabel(
+                        self.result_frame,
+                        text=f"──── {cat} ────",
+                        font=("Segoe UI", 14, "bold"),
+                        text_color="#00bfff"
+                    )
+                    cat_label.pack(fill="x", pady=(20, 5), padx=10)
+                    current_category = cat
+
+                channel_frame = ctk.CTkFrame(self.result_frame)
+                channel_frame.pack(fill="x", pady=6, padx=20)
+
+                name_label = ctk.CTkLabel(
+                    channel_frame,
+                    text=ch.get('name', 'İsimsiz'),
+                    font=("Consolas", 12),
+                    anchor="w",
+                    width=350
+                )
+                name_label.pack(side="left", padx=(0, 10))
+
+                url_label = ctk.CTkLabel(
+                    channel_frame,
+                    text=ch['url'][:80] + "..." if len(ch['url']) > 80 else ch['url'],
+                    font=("Consolas", 10),
+                    text_color="gray",
+                    anchor="w"
+                )
+                url_label.pack(side="left", fill="x", expand=True)
+
+                download_btn = ctk.CTkButton(
+                    channel_frame,
+                    text="İndir",
+                    width=100,
+                    height=32,
+                    fg_color="#2ecc71",
+                    hover_color="#27ae60",
+                    command=lambda u=ch['url'], n=ch.get('name', 'indirme'), cf=channel_frame: self.start_download(u, n, cf)
+                )
+                download_btn.pack(side="right", padx=(10, 0))
+
+            self.status_bar.configure(text=f"Başarılı → {len(channels)} kanal yüklendi")
+
+        except Exception as e:
+            self.welcome_label.configure(text=f"Hata:\n{str(e)}", text_color="red")
+            self.status_bar.configure(text="Genel hata oluştu.")
 
     def start_download(self, url: str, name: str, channel_frame: ctk.CTkFrame):
         if url in self.progress_widgets:
             self.status_bar.configure(text="Bu indirme zaten çalışıyor.")
             return
 
-        # Progress frame oluştur
         progress_frame = ctk.CTkFrame(channel_frame)
         progress_frame.pack(fill="x", pady=(5, 0))
 
@@ -84,13 +184,18 @@ class SpecterDLApp(ctk.CTk):
             status_label.configure(text=f"{percent*100:.1f}% | {speed} MB/s | ETA: {eta:.0f}s")
 
         def thread_target():
-            success, result = self.downloader.download_file(url, f"{name}.ts", update_progress)
+            success, result = self.downloader.download_file(
+                url,
+                f"{name}.ts",
+                update_progress,
+                config_manager=self.config   # Gece modu ve hız sınırlama config'i buradan geliyor
+            )
             if success:
                 status_label.configure(text="Tamamlandı → downloads klasöründe")
                 progress_bar.set(1)
             else:
                 status_label.configure(text=f"Hata: {result[:50]}...", text_color="red")
-            time.sleep(3)  # 3 sn sonra progress frame'i sil
+            time.sleep(3)
             progress_frame.pack_forget()
             del self.progress_widgets[url]
             self.status_bar.configure(text="İndirme tamamlandı: " + name)
@@ -98,7 +203,16 @@ class SpecterDLApp(ctk.CTk):
         threading.Thread(target=thread_target, daemon=True).start()
         self.status_bar.configure(text=f"İndirme kuyruğa alındı: {name} (aktif: {len(self.progress_widgets)})")
 
-    # parse_url, select_file vb. önceki halleriyle kalıyor (kodun geri kalanını buraya kopyala, değiştirmeden bırak)
+    def select_file(self):
+        file_path = filedialog.askopenfilename(
+            title="M3U/M3U8 Seç",
+            filetypes=[("Playlist", "*.m3u *.m3u8 *.txt"), ("Tüm", "*.*")]
+        )
+        if file_path:
+            self.url_entry.delete(0, "end")
+            self.url_entry.insert(0, file_path)
+            self.parse_url()
+
 
 if __name__ == "__main__":
     app = SpecterDLApp()
