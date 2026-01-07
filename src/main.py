@@ -1,6 +1,7 @@
 # src/main.py
 # SpecterDLx2 - Portable Downloader
 # İndirme geçmişi sekmesi eklendi (tamamlanan / hatalı / aktif)
+# Kod temizlendi, syntax hataları giderildi
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -73,7 +74,7 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showinfo("Başarılı", "Ayarlar kaydedildi! Yeni indirmelerde uygulanacak.")
             self.destroy()
         except ValueError:
-            messagebox.showerror("Hata", "Lütfen sayısal değerler girin.")
+            messagebox.showerror("Hata", "Lütfen sayısal değerler girin (hız, concurrent vb.)")
         except Exception as e:
             messagebox.showerror("Hata", f"Kaydetme hatası: {str(e)}")
 
@@ -93,7 +94,7 @@ class SpecterDLApp(ctk.CTk):
         self.completed_downloads = []  # [{'name': str, 'path': str, 'size': int, 'time': str, 'url': str}]
         self.failed_downloads = []     # [{'name': str, 'error': str, 'time': str, 'url': str}]
 
-        # Tabview ekle
+        # Tabview
         self.tabview = ctk.CTkTabview(self)
         self.tabview.pack(padx=20, pady=10, fill="both", expand=True)
 
@@ -101,7 +102,7 @@ class SpecterDLApp(ctk.CTk):
         self.tab_completed = self.tabview.add("Tamamlananlar")
         self.tab_failed = self.tabview.add("Hatalılar")
 
-        # Üst kısım (giriş + butonlar)
+        # Üst kısım
         self.top_frame = ctk.CTkFrame(self)
         self.top_frame.pack(padx=20, pady=(10, 0), fill="x")
 
@@ -252,7 +253,6 @@ class SpecterDLApp(ctk.CTk):
             if success:
                 status_label.configure(text="Tamamlandı → downloads klasöründe")
                 progress_bar.set(1)
-                # Geçmişe ekle
                 file_size = os.path.getsize(result) if os.path.exists(result) else 0
                 self.completed_downloads.append({
                     'name': name,
@@ -283,22 +283,18 @@ class SpecterDLApp(ctk.CTk):
     def update_completed_list(self):
         for widget in self.completed_list.winfo_children():
             widget.destroy()
-
         for item in self.completed_downloads:
             frame = ctk.CTkFrame(self.completed_list)
             frame.pack(fill="x", pady=5, padx=10)
-
             ctk.CTkLabel(frame, text=f"{item['name']} - {item['time']} - {item['size']/1024/1024:.2f} MB", font=("Consolas", 11)).pack(side="left")
             ctk.CTkLabel(frame, text=item['url'][:80] + "...", text_color="gray").pack(side="left", padx=20)
 
     def update_failed_list(self):
         for widget in self.failed_list.winfo_children():
             widget.destroy()
-
         for item in self.failed_downloads:
             frame = ctk.CTkFrame(self.failed_list)
             frame.pack(fill="x", pady=5, padx=10)
-
             ctk.CTkLabel(frame, text=f"{item['name']} - {item['time']} - Hata: {item['error'][:100]}", font=("Consolas", 11), text_color="red").pack(side="left")
             ctk.CTkLabel(frame, text=item['url'][:80] + "...", text_color="gray").pack(side="left", padx=20)
 
@@ -322,7 +318,6 @@ class SpecterDLApp(ctk.CTk):
             if success:
                 status_label.configure(text=f"Tamamlandı: {os.path.basename(result)}")
                 progress_bar.set(1)
-                # Geçmişe ekle
                 file_size = os.path.getsize(result) if os.path.exists(result) else 0
                 self.completed_downloads.append({
                     'name': name,
