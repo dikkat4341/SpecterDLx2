@@ -5,6 +5,9 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
+# Xtream parser'ı import et (önceki adımda eklediğimiz dosya)
+from xtream_parser import XtreamParser
+
 # Tema ayarları (dark/light/system)
 ctk.set_appearance_mode("dark")          # "light" veya "system" de seçebilirsin
 ctk.set_default_color_theme("dark-blue") # mavi tonlu güzel tema
@@ -51,7 +54,7 @@ class SpecterDLApp(ctk.CTk):
             command=self.select_file
         ).pack(side="left")
 
-        # Orta kısım: Sonuç alanı (şimdilik basit label'lar, sonra treeview olacak)
+        # Orta kısım: Sonuç alanı
         self.result_frame = ctk.CTkScrollableFrame(self, corner_radius=10)
         self.result_frame.pack(padx=20, pady=10, fill="both", expand=True)
 
@@ -80,12 +83,71 @@ class SpecterDLApp(ctk.CTk):
             messagebox.showwarning("Giriş eksik", "Lütfen bir URL veya dosya yolu girin.")
             return
 
-        self.status_bar.configure(text="Yükleniyor... Lütfen bekleyin.")
-        self.update()
+        self.status_bar.configure(text="Playlist yükleniyor... Lütfen bekleyin.")
+        self.update()  # GUI'yi hemen güncelle
 
-        # Şimdilik test mesajı (parse mantığı sonraki adımda gelecek)
-        self.welcome_label.configure(text="Yükleme testi başarılı!\nURL: " + url[:100] + "...")
-        self.status_bar.configure(text=f"Parse tamamlandı → Test modu (gerçek parse sonraki adım)")
+        try:
+            parser = XtreamParser()
+            channels, error = parser.parse(url)
+
+            # Eski widget'ları temizle (welcome hariç)
+            for widget in self.result_frame.winfo_children():
+                if widget != self.welcome_label:
+                    widget.destroy()
+
+            if error:
+                self.welcome_label.configure(
+                    text=f"Hata oluştu:\n{error}",
+                    text_color="red"
+                )
+                self.status_bar.configure(text=f"Hata: {error[:80]}...")
+                return
+
+            if not channels:
+                self.welcome_label.configure(
+                    text="Hiç kanal bulunamadı veya format desteklenmiyor.",
+                    text_color="orange"
+                )
+                self.status_bar.configure(text="Parse tamamlandı ama boş liste döndü.")
+                return
+
+            # Başarılıysa welcome'ı gizle
+            self.welcome_label.pack_forget()
+
+            # Kanalları kategori başlıklarıyla göster
+            current_category = None
+            for ch in channels:
+                cat = ch.get("category", "Genel")
+                if cat != current_category:
+                    cat_label = ctk.CTkLabel(
+                        self.result_frame,
+                        text=f"──── {cat} ────",
+                        font=("Segoe UI", 14, "bold"),
+                        text_color="#00bfff"
+                    )
+                    cat_label.pack(fill="x", pady=(15, 5), padx=10)
+                    current_category = cat
+
+                # Kanal bilgisi
+                channel_text = f"{ch.get('name', 'İsimsiz')} → {ch['url'][:100]}..."
+                channel_label = ctk.CTkLabel(
+                    self.result_frame,
+                    text=channel_text,
+                    font=("Consolas", 11),
+                    anchor="w",
+                    justify="left",
+                    text_color="white"
+                )
+                channel_label.pack(fill="x", pady=2, padx=20)
+
+            self.status_bar.configure(text=f"Başarılı → {len(channels)} kanal yüklendi ({len(set(ch.get('category', '') for ch in channels))} kategori)")
+
+        except Exception as e:
+            self.welcome_label.configure(
+                text=f"Beklenmedik hata:\n{str(e)}",
+                text_color="red"
+            )
+            self.status_bar.configure(text="Genel hata – URL'yi kontrol edin")
 
     def select_file(self):
         file_path = filedialog.askopenfilename(
