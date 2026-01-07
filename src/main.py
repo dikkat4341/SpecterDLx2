@@ -1,6 +1,6 @@
 # src/main.py
 # SpecterDLx2 - Portable Downloader
-# yt-dlp entegrasyonu eklendi (YouTube URL otomatik tespit)
+# Ayarlar ekranı eklendi (gece modu, hız limitleri, concurrent sayısı)
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -17,6 +17,72 @@ from ytdlp_wrapper import YtdlpWrapper
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
+class SettingsWindow(ctk.CTkToplevel):
+    def __init__(self, parent, config: ConfigManager):
+        super().__init__(parent)
+        self.title("Ayarlar")
+        self.geometry("600x500")
+        self.resizable(False, False)
+        self.config = config
+        self.settings = self.config.load_settings()
+
+        # Gece modu toggle
+        ctk.CTkLabel(self, text="Gece Modu:", font=("Segoe UI", 14)).pack(pady=10)
+        self.night_toggle = ctk.CTkSwitch(self, text="Aktif", variable=ctk.BooleanVar(value=self.settings.get("night_mode", False)))
+        self.night_toggle.pack()
+
+        # Gece başlama saati
+        ctk.CTkLabel(self, text="Gece Başlama (HH:MM):", font=("Segoe UI", 12)).pack(pady=5)
+        self.night_start = ctk.CTkEntry(self, placeholder_text="22:00", width=100)
+        self.night_start.insert(0, self.settings.get("night_start", "22:00"))
+        self.night_start.pack()
+
+        # Gece bitiş saati
+        ctk.CTkLabel(self, text="Gece Bitiş (HH:MM):", font=("Segoe UI", 12)).pack(pady=5)
+        self.night_end = ctk.CTkEntry(self, placeholder_text="08:00", width=100)
+        self.night_end.insert(0, self.settings.get("night_end", "08:00"))
+        self.night_end.pack()
+
+        # Gece hız sınırı
+        ctk.CTkLabel(self, text="Gece Hız Sınırı (KB/s):", font=("Segoe UI", 12)).pack(pady=5)
+        self.night_speed = ctk.CTkEntry(self, placeholder_text="512", width=100)
+        self.night_speed.insert(0, str(self.settings.get("night_speed_limit_kbps", 512)))
+        self.night_speed.pack()
+
+        # Global hız sınırı
+        ctk.CTkLabel(self, text="Genel Hız Sınırı (KB/s - 0=sınırsız):", font=("Segoe UI", 12)).pack(pady=5)
+        self.global_speed = ctk.CTkEntry(self, placeholder_text="0", width=100)
+        self.global_speed.insert(0, str(self.settings.get("global_speed_limit_kbps", 0)))
+        self.global_speed.pack()
+
+        # Maks concurrent
+        ctk.CTkLabel(self, text="Maks Eşzamanlı İndirme:", font=("Segoe UI", 12)).pack(pady=5)
+        self.max_conc = ctk.CTkEntry(self, placeholder_text="4", width=100)
+        self.max_conc.insert(0, str(self.settings.get("max_concurrent", 4)))
+        self.max_conc.pack()
+
+        # Kaydet butonu
+        ctk.CTkButton(self, text="Ayarları Kaydet", width=200, height=40, fg_color="green", command=self.save_settings).pack(pady=30)
+
+    def save_settings(self):
+        try:
+            new_settings = {
+                "night_mode": self.night_toggle.get(),
+                "night_start": self.night_start.get(),
+                "night_end": self.night_end.get(),
+                "night_speed_limit_kbps": int(self.night_speed.get()),
+                "global_speed_limit_kbps": int(self.global_speed.get()),
+                "max_concurrent": int(self.max_conc.get()),
+                "user_agent_mode": self.config.load_settings().get("user_agent_mode", "random")
+            }
+            self.config.save_settings(new_settings)
+            messagebox.showinfo("Başarılı", "Ayarlar kaydedildi! Yeni indirmelerde uygulanacak.")
+            self.destroy()
+        except ValueError:
+            messagebox.showerror("Hata", "Lütfen sayısal değerler girin (hız, concurrent vb.)")
+        except Exception as e:
+            messagebox.showerror("Hata", f"Kaydetme hatası: {str(e)}")
+
 class SpecterDLApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -26,7 +92,7 @@ class SpecterDLApp(ctk.CTk):
 
         self.config = ConfigManager()
         self.favorites = self.config.load_favorites()
-        self.downloader = SimpleDownloader(max_concurrent=4)
+        self.downloader = SimpleDownloader(max_concurrent=self.config.load_settings().get("max_concurrent", 4))
         self.ytdlp_wrapper = YtdlpWrapper()
 
         self.progress_widgets = {}
@@ -37,12 +103,13 @@ class SpecterDLApp(ctk.CTk):
 
         ctk.CTkLabel(self.top_frame, text="M3U / Xtream / YouTube URL:", font=("Segoe UI", 14, "bold")).pack(side="left", padx=(15, 10))
 
-        self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="http://... veya https://youtube.com/watch?v=...", height=40, font=("Consolas", 12), corner_radius=8)
+        self.url_entry = ctk.CTkEntry(self.top_frame, placeholder_text="http://... veya https://youtube.com/...", height=40, font=("Consolas", 12), corner_radius=8)
         self.url_entry.pack(side="left", fill="x", expand=True, padx=10)
 
         ctk.CTkButton(self.top_frame, text="Yükle & Parse", width=160, height=40, command=self.parse_url).pack(side="left", padx=(0, 10))
         ctk.CTkButton(self.top_frame, text="Dosya Seç", width=120, height=40, command=self.select_file).pack(side="left")
         ctk.CTkButton(self.top_frame, text="Favori Ekle", width=140, height=40, fg_color="#3498db", command=self.add_favorite).pack(side="left", padx=(10, 0))
+        ctk.CTkButton(self.top_frame, text="Ayarlar", width=120, height=40, fg_color="#8e44ad", command=self.open_settings).pack(side="left", padx=(10, 0))
 
         self.fav_frame = ctk.CTkFrame(self.top_frame)
         self.fav_frame.pack(side="right", padx=10)
@@ -58,27 +125,49 @@ class SpecterDLApp(ctk.CTk):
         self.welcome_label = ctk.CTkLabel(self.result_frame, text="Henüz playlist yüklenmedi.", font=("Segoe UI", 16), text_color="gray")
         self.welcome_label.pack(pady=100)
 
-        self.status_bar = ctk.CTkLabel(self, text="Hazır... | Maks 4 eşzamanlı indirme", height=30, anchor="w", padx=20, text_color="gray")
+        self.status_bar = ctk.CTkLabel(self, text="Hazır... | Ayarlar için üstteki butona bas", height=30, anchor="w", padx=20, text_color="gray")
         self.status_bar.pack(fill="x", side="bottom")
 
-    # add_favorite, load_favorite önceki gibi kalıyor
+    def open_settings(self):
+        SettingsWindow(self, self.config)
+
+    def add_favorite(self):
+        url = self.url_entry.get().strip()
+        if not url:
+            messagebox.showwarning("Giriş eksik", "Favori eklemek için URL girin.")
+            return
+        name = ctk.CTkInputDialog(text="Favori ismi girin:", title="Favori Ekle").get_input()
+        if name:
+            if self.config.add_favorite(name, url):
+                self.favorites = self.config.load_favorites()
+                self.fav_combo.configure(values=[f["name"] for f in self.favorites])
+                messagebox.showinfo("Başarılı", f"{name} favorilere eklendi.")
+            else:
+                messagebox.showwarning("Uyarı", "Bu URL zaten favorilerde.")
+
+    def load_favorite(self):
+        selected_name = self.fav_combo.get()
+        for f in self.favorites:
+            if f["name"] == selected_name:
+                self.url_entry.delete(0, "end")
+                self.url_entry.insert(0, f["url"])
+                self.parse_url()
+                break
 
     def parse_url(self):
         url = self.url_entry.get().strip()
         if not url:
-            messagebox.showwarning("Giriş eksik", "Lütfen URL veya dosya yolu girin.")
+            messagebox.showwarning("Giriş eksik", "Lütfen URL girin.")
             return
 
         self.status_bar.configure(text="Yükleniyor...")
         self.update()
 
-        # YouTube / yt-dlp kontrolü
         if re.search(r'(youtube\.com|youtu\.be)', url, re.IGNORECASE):
-            self.status_bar.configure(text="YouTube tespit edildi - yt-dlp ile indirme başlatılıyor...")
-            self.start_ytdlp_download(url, "youtube_indirme")
+            self.status_bar.configure(text="YouTube tespit edildi - yt-dlp ile indiriliyor...")
+            self.start_ytdlp_download(url, "youtube_video")
             return
 
-        # Normal Xtream / M3U parse
         try:
             parser = XtreamParser()
             channels, error = parser.parse(url)
@@ -126,9 +215,6 @@ class SpecterDLApp(ctk.CTk):
             self.status_bar.configure(text="Genel hata oluştu.")
 
     def start_download(self, url: str, name: str, channel_frame: ctk.CTkFrame):
-        # ... önceki start_download fonksiyonu tamamen aynı kalıyor (config_manager=self.config ile çağrı zaten var)
-        # Sadece comment ekleyebilirsin: # yt-dlp değil, normal downloader kullanılıyor
-
         if url in self.progress_widgets:
             self.status_bar.configure(text="Bu indirme zaten çalışıyor.")
             return
@@ -150,7 +236,9 @@ class SpecterDLApp(ctk.CTk):
             status_label.configure(text=f"{percent*100:.1f}% | {speed} MB/s | ETA: {eta:.0f}s")
 
         def thread_target():
-            success, result = self.downloader.download_file(url, f"{name}.ts", update_progress, config_manager=self.config)
+            success, result = self.downloader.download_file(
+                url, f"{name}.ts", update_progress, config_manager=self.config
+            )
             if success:
                 status_label.configure(text="Tamamlandı → downloads klasöründe")
                 progress_bar.set(1)
@@ -165,7 +253,6 @@ class SpecterDLApp(ctk.CTk):
         self.status_bar.configure(text=f"İndirme kuyruğa alındı: {name} (aktif: {len(self.progress_widgets)})")
 
     def start_ytdlp_download(self, url: str, name: str):
-        """YouTube için yt-dlp indirme"""
         progress_frame = ctk.CTkFrame(self.result_frame)
         progress_frame.pack(fill="x", pady=10, padx=20)
 
