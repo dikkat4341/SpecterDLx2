@@ -4,20 +4,25 @@
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import threading  # İndirme arka planda çalışsın diye
 
-# Xtream parser'ı import et (önceki adımda eklediğimiz dosya)
+# Xtream parser ve downloader import
 from xtream_parser import XtreamParser
+from downloader import SimpleDownloader
 
-# Tema ayarları (dark/light/system)
-ctk.set_appearance_mode("dark")          # "light" veya "system" de seçebilirsin
-ctk.set_default_color_theme("dark-blue") # mavi tonlu güzel tema
+# Tema ayarları
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
 
 class SpecterDLApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("SpecterDLx2 - Portable Downloader")
-        self.geometry("1000x650")
+        self.geometry("1200x750")  # Biraz genişlettik (butonlar için)
         self.resizable(True, True)
+
+        # Downloader instance (downloads klasörüne kaydeder)
+        self.downloader = SimpleDownloader(download_dir="downloads")
 
         # Üst çerçeve: URL girişi
         self.top_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -84,37 +89,29 @@ class SpecterDLApp(ctk.CTk):
             return
 
         self.status_bar.configure(text="Playlist yükleniyor... Lütfen bekleyin.")
-        self.update()  # GUI'yi hemen güncelle
+        self.update()
 
         try:
             parser = XtreamParser()
             channels, error = parser.parse(url)
 
-            # Eski widget'ları temizle (welcome hariç)
+            # Eski widget'ları temizle
             for widget in self.result_frame.winfo_children():
                 if widget != self.welcome_label:
                     widget.destroy()
 
             if error:
-                self.welcome_label.configure(
-                    text=f"Hata oluştu:\n{error}",
-                    text_color="red"
-                )
+                self.welcome_label.configure(text=f"Hata oluştu:\n{error}", text_color="red")
                 self.status_bar.configure(text=f"Hata: {error[:80]}...")
                 return
 
             if not channels:
-                self.welcome_label.configure(
-                    text="Hiç kanal bulunamadı veya format desteklenmiyor.",
-                    text_color="orange"
-                )
-                self.status_bar.configure(text="Parse tamamlandı ama boş liste döndü.")
+                self.welcome_label.configure(text="Hiç kanal bulunamadı.", text_color="orange")
+                self.status_bar.configure(text="Parse tamamlandı ama boş liste.")
                 return
 
-            # Başarılıysa welcome'ı gizle
             self.welcome_label.pack_forget()
 
-            # Kanalları kategori başlıklarıyla göster
             current_category = None
             for ch in channels:
                 cat = ch.get("category", "Genel")
@@ -125,29 +122,60 @@ class SpecterDLApp(ctk.CTk):
                         font=("Segoe UI", 14, "bold"),
                         text_color="#00bfff"
                     )
-                    cat_label.pack(fill="x", pady=(15, 5), padx=10)
+                    cat_label.pack(fill="x", pady=(20, 5), padx=10)
                     current_category = cat
 
-                # Kanal bilgisi
-                channel_text = f"{ch.get('name', 'İsimsiz')} → {ch['url'][:100]}..."
-                channel_label = ctk.CTkLabel(
-                    self.result_frame,
-                    text=channel_text,
+                # Kanal frame (yatay düzen)
+                channel_frame = ctk.CTkFrame(self.result_frame)
+                channel_frame.pack(fill="x", pady=4, padx=20)
+
+                name_label = ctk.CTkLabel(
+                    channel_frame,
+                    text=ch.get('name', 'İsimsiz'),
                     font=("Consolas", 11),
                     anchor="w",
-                    justify="left",
-                    text_color="white"
+                    width=400
                 )
-                channel_label.pack(fill="x", pady=2, padx=20)
+                name_label.pack(side="left", padx=(0, 10))
 
-            self.status_bar.configure(text=f"Başarılı → {len(channels)} kanal yüklendi ({len(set(ch.get('category', '') for ch in channels))} kategori)")
+                url_label = ctk.CTkLabel(
+                    channel_frame,
+                    text=ch['url'][:100] + ("..." if len(ch['url']) > 100 else ""),
+                    font=("Consolas", 10),
+                    text_color="gray",
+                    anchor="w"
+                )
+                url_label.pack(side="left", fill="x", expand=True)
+
+                # İndir butonu
+                download_btn = ctk.CTkButton(
+                    channel_frame,
+                    text="İndir",
+                    width=100,
+                    height=30,
+                    fg_color="green",
+                    hover_color="darkgreen",
+                    command=lambda u=ch['url'], n=ch.get('name', 'indirme'): self.start_download(u, n)
+                )
+                download_btn.pack(side="right", padx=(10, 0))
+
+            self.status_bar.configure(text=f"Başarılı → {len(channels)} kanal yüklendi")
 
         except Exception as e:
-            self.welcome_label.configure(
-                text=f"Beklenmedik hata:\n{str(e)}",
-                text_color="red"
-            )
-            self.status_bar.configure(text="Genel hata – URL'yi kontrol edin")
+            self.welcome_label.configure(text=f"Beklenmedik hata:\n{str(e)}", text_color="red")
+            self.status_bar.configure(text="Genel hata – URL kontrol edin")
+
+    def start_download(self, url: str, name: str):
+        """İndirmeyi arka planda başlat (GUI donmasın)"""
+        def thread_target():
+            success, result = self.downloader.download_file(url, filename=f"{name}.ts")
+            if success:
+                self.status_bar.configure(text=f"İndirme tamamlandı: {os.path.basename(result)} → downloads klasöründe")
+            else:
+                self.status_bar.configure(text=f"İndirme hatası: {result[:80]}")
+
+        threading.Thread(target=thread_target, daemon=True).start()
+        self.status_bar.configure(text=f"İndirme başladı: {name}")
 
     def select_file(self):
         file_path = filedialog.askopenfilename(
