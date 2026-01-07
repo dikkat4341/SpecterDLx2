@@ -1,6 +1,6 @@
 # src/main.py
 # SpecterDLx2 - Portable Downloader
-# Ayarlar ekranı eklendi (gece modu, hız limitleri, concurrent sayısı)
+# İndirme geçmişi sekmesi eklendi (tamamlanan / hatalı / aktif)
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -8,6 +8,7 @@ import threading
 import time
 import os
 import re
+from datetime import datetime
 
 from xtream_parser import XtreamParser
 from downloader import SimpleDownloader
@@ -26,42 +27,35 @@ class SettingsWindow(ctk.CTkToplevel):
         self.config = config
         self.settings = self.config.load_settings()
 
-        # Gece modu toggle
         ctk.CTkLabel(self, text="Gece Modu:", font=("Segoe UI", 14)).pack(pady=10)
         self.night_toggle = ctk.CTkSwitch(self, text="Aktif", variable=ctk.BooleanVar(value=self.settings.get("night_mode", False)))
         self.night_toggle.pack()
 
-        # Gece başlama saati
         ctk.CTkLabel(self, text="Gece Başlama (HH:MM):", font=("Segoe UI", 12)).pack(pady=5)
         self.night_start = ctk.CTkEntry(self, placeholder_text="22:00", width=100)
         self.night_start.insert(0, self.settings.get("night_start", "22:00"))
         self.night_start.pack()
 
-        # Gece bitiş saati
         ctk.CTkLabel(self, text="Gece Bitiş (HH:MM):", font=("Segoe UI", 12)).pack(pady=5)
         self.night_end = ctk.CTkEntry(self, placeholder_text="08:00", width=100)
         self.night_end.insert(0, self.settings.get("night_end", "08:00"))
         self.night_end.pack()
 
-        # Gece hız sınırı
         ctk.CTkLabel(self, text="Gece Hız Sınırı (KB/s):", font=("Segoe UI", 12)).pack(pady=5)
         self.night_speed = ctk.CTkEntry(self, placeholder_text="512", width=100)
         self.night_speed.insert(0, str(self.settings.get("night_speed_limit_kbps", 512)))
         self.night_speed.pack()
 
-        # Global hız sınırı
         ctk.CTkLabel(self, text="Genel Hız Sınırı (KB/s - 0=sınırsız):", font=("Segoe UI", 12)).pack(pady=5)
         self.global_speed = ctk.CTkEntry(self, placeholder_text="0", width=100)
         self.global_speed.insert(0, str(self.settings.get("global_speed_limit_kbps", 0)))
         self.global_speed.pack()
 
-        # Maks concurrent
         ctk.CTkLabel(self, text="Maks Eşzamanlı İndirme:", font=("Segoe UI", 12)).pack(pady=5)
         self.max_conc = ctk.CTkEntry(self, placeholder_text="4", width=100)
         self.max_conc.insert(0, str(self.settings.get("max_concurrent", 4)))
         self.max_conc.pack()
 
-        # Kaydet butonu
         ctk.CTkButton(self, text="Ayarları Kaydet", width=200, height=40, fg_color="green", command=self.save_settings).pack(pady=30)
 
     def save_settings(self):
@@ -79,7 +73,7 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showinfo("Başarılı", "Ayarlar kaydedildi! Yeni indirmelerde uygulanacak.")
             self.destroy()
         except ValueError:
-            messagebox.showerror("Hata", "Lütfen sayısal değerler girin (hız, concurrent vb.)")
+            messagebox.showerror("Hata", "Lütfen sayısal değerler girin.")
         except Exception as e:
             messagebox.showerror("Hata", f"Kaydetme hatası: {str(e)}")
 
@@ -87,7 +81,7 @@ class SpecterDLApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("SpecterDLx2 - Portable Downloader")
-        self.geometry("1200x900")
+        self.geometry("1300x950")
         self.resizable(True, True)
 
         self.config = ConfigManager()
@@ -95,11 +89,21 @@ class SpecterDLApp(ctk.CTk):
         self.downloader = SimpleDownloader(max_concurrent=self.config.load_settings().get("max_concurrent", 4))
         self.ytdlp_wrapper = YtdlpWrapper()
 
-        self.progress_widgets = {}
+        self.progress_widgets = {}  # Aktif indirmeler
+        self.completed_downloads = []  # [{'name': str, 'path': str, 'size': int, 'time': str, 'url': str}]
+        self.failed_downloads = []     # [{'name': str, 'error': str, 'time': str, 'url': str}]
 
-        # Üst kısım
-        self.top_frame = ctk.CTkFrame(self, corner_radius=10)
-        self.top_frame.pack(padx=20, pady=(20, 10), fill="x")
+        # Tabview ekle
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(padx=20, pady=10, fill="both", expand=True)
+
+        self.tab_active = self.tabview.add("Aktif İndirmeler")
+        self.tab_completed = self.tabview.add("Tamamlananlar")
+        self.tab_failed = self.tabview.add("Hatalılar")
+
+        # Üst kısım (giriş + butonlar)
+        self.top_frame = ctk.CTkFrame(self)
+        self.top_frame.pack(padx=20, pady=(10, 0), fill="x")
 
         ctk.CTkLabel(self.top_frame, text="M3U / Xtream / YouTube URL:", font=("Segoe UI", 14, "bold")).pack(side="left", padx=(15, 10))
 
@@ -118,14 +122,20 @@ class SpecterDLApp(ctk.CTk):
         self.fav_combo.pack(side="left", padx=5)
         ctk.CTkButton(self.fav_frame, text="Yükle", width=80, command=self.load_favorite).pack(side="left")
 
-        # Sonuç alanı
-        self.result_frame = ctk.CTkScrollableFrame(self, corner_radius=10)
-        self.result_frame.pack(padx=20, pady=10, fill="both", expand=True)
-
-        self.welcome_label = ctk.CTkLabel(self.result_frame, text="Henüz playlist yüklenmedi.", font=("Segoe UI", 16), text_color="gray")
+        # Aktif indirmeler tab'ına welcome label
+        self.welcome_label = ctk.CTkLabel(self.tab_active, text="Henüz indirme yok.\nPlaylist yükle ve İndir butonuna bas.", font=("Segoe UI", 16), text_color="gray")
         self.welcome_label.pack(pady=100)
 
-        self.status_bar = ctk.CTkLabel(self, text="Hazır... | Ayarlar için üstteki butona bas", height=30, anchor="w", padx=20, text_color="gray")
+        # Tamamlananlar listesi
+        self.completed_list = ctk.CTkScrollableFrame(self.tab_completed)
+        self.completed_list.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Hatalılar listesi
+        self.failed_list = ctk.CTkScrollableFrame(self.tab_failed)
+        self.failed_list.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Durum bar
+        self.status_bar = ctk.CTkLabel(self, text="Hazır... | SpecterDLx2 v0.4", height=30, anchor="w", padx=20, text_color="gray")
         self.status_bar.pack(fill="x", side="bottom")
 
     def open_settings(self):
@@ -172,7 +182,7 @@ class SpecterDLApp(ctk.CTk):
             parser = XtreamParser()
             channels, error = parser.parse(url)
 
-            for widget in self.result_frame.winfo_children():
+            for widget in self.tab_active.winfo_children():
                 if widget != self.welcome_label:
                     widget.destroy()
 
@@ -192,11 +202,11 @@ class SpecterDLApp(ctk.CTk):
             for ch in channels:
                 cat = ch.get("category", "Genel")
                 if cat != current_category:
-                    cat_label = ctk.CTkLabel(self.result_frame, text=f"──── {cat} ────", font=("Segoe UI", 14, "bold"), text_color="#00bfff")
+                    cat_label = ctk.CTkLabel(self.tab_active, text=f"──── {cat} ────", font=("Segoe UI", 14, "bold"), text_color="#00bfff")
                     cat_label.pack(fill="x", pady=(20, 5), padx=10)
                     current_category = cat
 
-                channel_frame = ctk.CTkFrame(self.result_frame)
+                channel_frame = ctk.CTkFrame(self.tab_active)
                 channel_frame.pack(fill="x", pady=6, padx=20)
 
                 name_label = ctk.CTkLabel(channel_frame, text=ch.get('name', 'İsimsiz'), font=("Consolas", 12), anchor="w", width=350)
@@ -242,8 +252,26 @@ class SpecterDLApp(ctk.CTk):
             if success:
                 status_label.configure(text="Tamamlandı → downloads klasöründe")
                 progress_bar.set(1)
+                # Geçmişe ekle
+                file_size = os.path.getsize(result) if os.path.exists(result) else 0
+                self.completed_downloads.append({
+                    'name': name,
+                    'path': result,
+                    'size': file_size,
+                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'url': url
+                })
+                self.update_completed_list()
             else:
                 status_label.configure(text=f"Hata: {result[:50]}...", text_color="red")
+                self.failed_downloads.append({
+                    'name': name,
+                    'error': result,
+                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'url': url
+                })
+                self.update_failed_list()
+
             time.sleep(3)
             progress_frame.pack_forget()
             del self.progress_widgets[url]
@@ -252,8 +280,30 @@ class SpecterDLApp(ctk.CTk):
         threading.Thread(target=thread_target, daemon=True).start()
         self.status_bar.configure(text=f"İndirme kuyruğa alındı: {name} (aktif: {len(self.progress_widgets)})")
 
+    def update_completed_list(self):
+        for widget in self.completed_list.winfo_children():
+            widget.destroy()
+
+        for item in self.completed_downloads:
+            frame = ctk.CTkFrame(self.completed_list)
+            frame.pack(fill="x", pady=5, padx=10)
+
+            ctk.CTkLabel(frame, text=f"{item['name']} - {item['time']} - {item['size']/1024/1024:.2f} MB", font=("Consolas", 11)).pack(side="left")
+            ctk.CTkLabel(frame, text=item['url'][:80] + "...", text_color="gray").pack(side="left", padx=20)
+
+    def update_failed_list(self):
+        for widget in self.failed_list.winfo_children():
+            widget.destroy()
+
+        for item in self.failed_downloads:
+            frame = ctk.CTkFrame(self.failed_list)
+            frame.pack(fill="x", pady=5, padx=10)
+
+            ctk.CTkLabel(frame, text=f"{item['name']} - {item['time']} - Hata: {item['error'][:100]}", font=("Consolas", 11), text_color="red").pack(side="left")
+            ctk.CTkLabel(frame, text=item['url'][:80] + "...", text_color="gray").pack(side="left", padx=20)
+
     def start_ytdlp_download(self, url: str, name: str):
-        progress_frame = ctk.CTkFrame(self.result_frame)
+        progress_frame = ctk.CTkFrame(self.tab_active)
         progress_frame.pack(fill="x", pady=10, padx=20)
 
         progress_bar = ctk.CTkProgressBar(progress_frame, width=600, height=25, mode="determinate")
@@ -272,8 +322,26 @@ class SpecterDLApp(ctk.CTk):
             if success:
                 status_label.configure(text=f"Tamamlandı: {os.path.basename(result)}")
                 progress_bar.set(1)
+                # Geçmişe ekle
+                file_size = os.path.getsize(result) if os.path.exists(result) else 0
+                self.completed_downloads.append({
+                    'name': name,
+                    'path': result,
+                    'size': file_size,
+                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'url': url
+                })
+                self.update_completed_list()
             else:
                 status_label.configure(text=f"Hata: {result}", text_color="red")
+                self.failed_downloads.append({
+                    'name': name,
+                    'error': result,
+                    'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'url': url
+                })
+                self.update_failed_list()
+
             time.sleep(5)
             progress_frame.pack_forget()
             self.status_bar.configure(text="YouTube indirme tamamlandı.")
