@@ -1,26 +1,21 @@
 # src/xtream_parser.py
 # Xtream Codes API + Standart M3U/M3U8 Parser
 # Xtream UI / XUI.ONE mantığına tam uyumlu (player_api.php + get.php m3u)
-# Güvenlik: Her istekte header rotasyonu eklenecek (sonraki adımda)
+# HeaderRotator entegrasyonu eklendi (anti-detection)
 
 import requests
 import re
 from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Tuple, Optional
 
+# Header rotator'ı import et (önceki adımda eklediğimiz dosya)
+from header_rotator import HeaderRotator
+
 class XtreamParser:
     def __init__(self):
         self.session = requests.Session()
         self.session.timeout = 15  # saniye
-
-    def _get_headers(self) -> Dict[str, str]:
-        """Geçici basit header (anti-detection için sonraki adımda HeaderRotator ile değiştirilecek)"""
-        return {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9,tr;q=0.8",
-            "Connection": "keep-alive"
-        }
+        self.rotator = HeaderRotator()  # Anti-detection kalbi burada başlatılıyor
 
     def parse(self, url_or_path: str) -> Tuple[List[Dict], Optional[str]]:
         """
@@ -31,21 +26,24 @@ class XtreamParser:
         error = None
         channels = []
 
+        # Header'ları rotator'dan al (her istek için yeni ve rastgele)
+        headers = self.rotator.get_headers(is_hls=False)  # Genel istekler için
+
         if url_or_path.startswith(("http://", "https://")):
             # URL ise Xtream Codes mu yoksa direkt m3u mu kontrol et
             parsed_url = urlparse(url_or_path)
             if "player_api.php" in url_or_path or "get.php" in url_or_path:
-                return self._parse_xtream_api(url_or_path)
+                return self._parse_xtream_api(url_or_path, headers)
             else:
                 # Direkt m3u8 veya m3u linki
                 try:
-                    resp = self.session.get(url_or_path, headers=self._get_headers())
+                    resp = self.session.get(url_or_path, headers=headers)
                     resp.raise_for_status()
                     content = resp.text
                 except Exception as e:
                     return [], f"URL erişim hatası: {str(e)}"
         else:
-            # Yerel dosya yolu
+            # Yerel dosya yolu (header gerekmez)
             try:
                 with open(url_or_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
@@ -59,11 +57,8 @@ class XtreamParser:
 
         return [], "Desteklenmeyen format veya boş içerik"
 
-    def _parse_xtream_api(self, base_url: str) -> Tuple[List[Dict], Optional[str]]:
-        """Xtream Codes player_api.php mantığı"""
-        # base_url örnek: http://sunucu:port/player_api.php?username=xxx&password=yyy
-        # veya http://sunucu:port/get.php?username=xxx&password=yyy&type=m3u_plus&output=ts
-
+    def _parse_xtream_api(self, base_url: str, base_headers: Dict) -> Tuple[List[Dict], Optional[str]]:
+        """Xtream Codes player_api.php mantığı - HeaderRotator ile"""
         params = {}
         if "?" in base_url:
             query = base_url.split("?", 1)[1]
@@ -82,18 +77,21 @@ class XtreamParser:
 
         channels = []
 
-        # Live kategorileri al (örnek endpoint)
         try:
+            # Live kategorileri al
             live_cat_url = f"{server}/player_api.php?action=get_live_categories&username={username}&password={password}"
-            resp = self.session.get(live_cat_url, headers=self._get_headers())
+            # Her API çağrısı için yeni header al (rotasyon)
+            cat_headers = self.rotator.get_headers(is_hls=False)
+            resp = self.session.get(live_cat_url, headers=cat_headers)
             if resp.status_code == 200:
                 cats = resp.json()
                 for cat in cats:
                     cat_name = cat.get("category_name", "Uncategorized")
-                    # Kanalları ayrı endpoint ile al (veya direkt m3u8 ile)
-                    # Şimdilik basit: direkt m3u_plus endpoint varsayalım
+
+                    # M3U endpoint için HLS header kullan (video akışı)
                     m3u_url = f"{server}/get.php?username={username}&password={password}&type=m3u_plus&output=ts"
-                    m3u_resp = self.session.get(m3u_url, headers=self._get_headers())
+                    m3u_headers = self.rotator.get_headers(is_hls=True)  # HLS için optimize header
+                    m3u_resp = self.session.get(m3u_url, headers=m3u_headers)
                     if m3u_resp.status_code == 200:
                         m3u_channels = self._parse_m3u_content(m3u_resp.text)
                         for ch in m3u_channels:
